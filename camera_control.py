@@ -45,6 +45,14 @@ PALETTES = [
     ("Iron Red", IR_IRON_RED_HEX)
 ]
 
+# ==========================================
+# 5. КАРТИНКА В КАРТИНЦІ (PIP)
+# ==========================================
+VIS_PIP_ON_HEX = "eb901455aadc11300f0000e0020000000003830000004cdf"
+VIS_PIP_OFF_HEX = "eb901455aadc11300f0000e0020000000003810000004edf"
+IR_PIP_ON_HEX = "eb901455aadc11300f0000e0020000000003840000004bdf"
+IR_PIP_OFF_HEX = "eb901455aadc11300f0000e0020000000003820000004ddf"
+
 STARTUP_PACKETS = [
     "eb901055aadc0d01e4000000000000000000e8b5",
     "eb90063e2a002a000092"
@@ -54,8 +62,9 @@ STATUS_REQUEST_HEX = "eb900755aadc0414110105"
 camera_socket = None
 current_key = None
 
-# Глобальні стани для логіки тепловізора
+# Глобальні стани камери
 is_thermal = False
+is_pip_on = False
 palette_idx = 0
 
 
@@ -89,7 +98,7 @@ def parse_telemetry(data_bytes):
 # СИСТЕМА КЕРУВАННЯ КЛАВІАТУРОЮ
 # ==========================================
 def on_press(key):
-    global current_key, camera_socket, is_thermal, palette_idx
+    global current_key, camera_socket, is_thermal, is_pip_on, palette_idx
     if camera_socket is None or key == current_key: return
 
     try:
@@ -127,7 +136,8 @@ def on_press(key):
 
             # --- ЛОГІКА ТЕПЛОВІЗОРА ---
             elif char == 't':
-                is_thermal = not is_thermal  # Перемикаємо стан
+                is_thermal = not is_thermal
+                is_pip_on = False  # Скидаємо PIP при зміні сенсора
                 if is_thermal:
                     print("\n[🔥] Увімкнено ТЕПЛОВІЗОР")
                     camera_socket.sendall(bytes.fromhex(CAM_THERMAL_HEX))
@@ -138,12 +148,25 @@ def on_press(key):
 
             elif char == 'p':
                 if is_thermal:
-                    palette_idx = (palette_idx + 1) % len(PALETTES)  # Гортаємо по колу
+                    palette_idx = (palette_idx + 1) % len(PALETTES)
                     p_name, p_hex = PALETTES[palette_idx]
                     print(f"\n[🎨] Палітра тепловізора: {p_name}")
                     camera_socket.sendall(bytes.fromhex(p_hex))
                 else:
                     print("\n[!] Палітри працюють лише в режимі тепловізора (натисни T)")
+                current_key = key
+
+            # --- ЛОГІКА PIP (Картинка в картинці) ---
+            elif char == 'i':
+                is_pip_on = not is_pip_on
+                if not is_thermal:  # Якщо зараз оптика
+                    cmd = VIS_PIP_ON_HEX if is_pip_on else VIS_PIP_OFF_HEX
+                else:  # Якщо зараз тепловізор
+                    cmd = IR_PIP_ON_HEX if is_pip_on else IR_PIP_OFF_HEX
+
+                status_str = "УВІМКНЕНО" if is_pip_on else "ВИМКНЕНО"
+                print(f"\n[🔲] Режим PIP (Картинка в картинці): {status_str}")
+                camera_socket.sendall(bytes.fromhex(cmd))
                 current_key = key
 
     except:
@@ -201,7 +224,8 @@ def main():
 
             print("[+] Ініціалізація успішна!")
             print("[*] РУХ: Стрілки | ЗУМ: W / S | HOME: H | НАДИР: N")
-            print("[*] ТЕПЛОВІЗОР: T (Увімк/Вимк) | ПАЛІТРИ: P (Зміна кольору)")
+            print("[*] ТЕПЛОВІЗОР: T (Увімк/Вимк) | ПАЛІТРИ: P")
+            print("[*] PIP (Віконце): I")
             print("[*] ВИХІД: ESC\n")
             print("-" * 65)
 
