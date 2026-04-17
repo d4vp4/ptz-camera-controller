@@ -17,17 +17,33 @@ MOVE_RIGHT_HEX = "eb901455aadc11300d00000668000005dc00000000009b13"
 STOP_HEX = "eb901455aadc11300100000000000000000000000000203d"
 
 # ==========================================
-# 2. КОМАНДИ ЗУМУ (Наближення / Віддалення)
+# 2. КОМАНДИ ЗУМУ
 # ==========================================
 ZOOM_IN_HEX = "eb901455aadc11300f0000000000000000025800000074f9"
 ZOOM_OUT_HEX = "eb901455aadc11300f000000000000000002180000003479"
 ZOOM_STOP_HEX = "eb901455aadc11300f000000000000000000400000006ed9"
 
 # ==========================================
-# 3. СПЕЦІАЛЬНІ КОМАНДИ (Home та Абсолютні кути)
+# 3. СПЕЦІАЛЬНІ КОМАНДИ (Home / Nadir)
 # ==========================================
-HOME_HEX         = "eb901455aadc11300400003ffc000000000000000000e641"
+HOME_HEX = "eb901455aadc11300400003ffc000000000000000000e641"
 PITCH_DOWN_90_HEX = "eb901455aadc113012000000000000000000000000003361"
+
+# ==========================================
+# 4. ТЕПЛОВІЗОР ТА ПАЛІТРИ
+# ==========================================
+CAM_VISIBLE_HEX = "eb901455aadc11300f0000e0020000000004830000004bdf"  # ir -> visible1
+CAM_THERMAL_HEX = "eb901455aadc11300f0000e0020000000004840000004ce1"  # visible1 -> ir
+
+IR_WHITE_HOT_HEX = "eb901455aadc11300f0000e0020000000003840000004bdf"
+IR_BLACK_HOT_HEX = "eb901455aadc11300f0000e0020000000003c40000000bdf"
+IR_IRON_RED_HEX = "eb901455aadc11300f0000e0020000000004840000004ce1"
+
+PALETTES = [
+    ("White Hot", IR_WHITE_HOT_HEX),
+    ("Black Hot", IR_BLACK_HOT_HEX),
+    ("Iron Red", IR_IRON_RED_HEX)
+]
 
 STARTUP_PACKETS = [
     "eb901055aadc0d01e4000000000000000000e8b5",
@@ -37,6 +53,10 @@ STATUS_REQUEST_HEX = "eb900755aadc0414110105"
 
 camera_socket = None
 current_key = None
+
+# Глобальні стани для логіки тепловізора
+is_thermal = False
+palette_idx = 0
 
 
 def parse_telemetry(data_bytes):
@@ -69,7 +89,7 @@ def parse_telemetry(data_bytes):
 # СИСТЕМА КЕРУВАННЯ КЛАВІАТУРОЮ
 # ==========================================
 def on_press(key):
-    global current_key, camera_socket
+    global current_key, camera_socket, is_thermal, palette_idx
     if camera_socket is None or key == current_key: return
 
     try:
@@ -87,7 +107,7 @@ def on_press(key):
             camera_socket.sendall(bytes.fromhex(MOVE_RIGHT_HEX))
             current_key = key
 
-        # Букви (Зум та Спецфункції)
+        # Букви
         elif hasattr(key, 'char') and key.char:
             char = key.char.lower()
             if char == 'w':
@@ -96,15 +116,34 @@ def on_press(key):
             elif char == 's':
                 camera_socket.sendall(bytes.fromhex(ZOOM_OUT_HEX))
                 current_key = key
-
-            # --- НОВІ ФУНКЦІЇ ---
-            elif char == 'h':  # Home (Додому)
+            elif char == 'h':
                 print("\n[*] Команда: Повернення в Home...")
                 camera_socket.sendall(bytes.fromhex(HOME_HEX))
                 current_key = key
-            elif char == 'n':  # Nadir (Вниз)
+            elif char == 'n':
                 print("\n[*] Команда: Pitch -90° (Надир)...")
                 camera_socket.sendall(bytes.fromhex(PITCH_DOWN_90_HEX))
+                current_key = key
+
+            # --- ЛОГІКА ТЕПЛОВІЗОРА ---
+            elif char == 't':
+                is_thermal = not is_thermal  # Перемикаємо стан
+                if is_thermal:
+                    print("\n[🔥] Увімкнено ТЕПЛОВІЗОР")
+                    camera_socket.sendall(bytes.fromhex(CAM_THERMAL_HEX))
+                else:
+                    print("\n[📷] Увімкнено ОПТИЧНУ КАМЕРУ")
+                    camera_socket.sendall(bytes.fromhex(CAM_VISIBLE_HEX))
+                current_key = key
+
+            elif char == 'p':
+                if is_thermal:
+                    palette_idx = (palette_idx + 1) % len(PALETTES)  # Гортаємо по колу
+                    p_name, p_hex = PALETTES[palette_idx]
+                    print(f"\n[🎨] Палітра тепловізора: {p_name}")
+                    camera_socket.sendall(bytes.fromhex(p_hex))
+                else:
+                    print("\n[!] Палітри працюють лише в режимі тепловізора (натисни T)")
                 current_key = key
 
     except:
@@ -115,7 +154,7 @@ def on_release(key):
     global current_key, camera_socket
     if camera_socket is None: return
 
-    # Відпускання стрілок -> Зупинка руху
+    # Відпускання стрілок
     if key in [keyboard.Key.up, keyboard.Key.down, keyboard.Key.left, keyboard.Key.right]:
         try:
             camera_socket.sendall(bytes.fromhex(STOP_HEX))
@@ -123,17 +162,16 @@ def on_release(key):
             pass
         current_key = None
 
-    # Відпускання кнопок зуму -> Зупинка зуму
+    # Відпускання зуму
     elif hasattr(key, 'char') and key.char:
         char = key.char.lower()
-        if char in ['w', '+', '=', 's', '-', '_']:
+        if char in ['w', 's']:
             try:
                 camera_socket.sendall(bytes.fromhex(ZOOM_STOP_HEX))
             except:
                 pass
             current_key = None
 
-    # Вихід зі скрипта по кнопці Esc
     if key == keyboard.Key.esc:
         print("\n\n[!] Вихід з програми...")
         return False
@@ -162,9 +200,9 @@ def main():
                 time.sleep(0.1)
 
             print("[+] Ініціалізація успішна!")
-            print("[*] УПРАВЛІННЯ РУХОМ: Стрілки (Up, Down, Left, Right)")
-            print("[*] УПРАВЛІННЯ ЗУМОМ: Кнопки 'W' (Наблизити) та 'S' (Віддалити)")
-            print("[*] ВИХІД: Натисни ESC\n")
+            print("[*] РУХ: Стрілки | ЗУМ: W / S | HOME: H | НАДИР: N")
+            print("[*] ТЕПЛОВІЗОР: T (Увімк/Вимк) | ПАЛІТРИ: P (Зміна кольору)")
+            print("[*] ВИХІД: ESC\n")
             print("-" * 65)
 
             last_poll_time = time.time()
