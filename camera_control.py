@@ -23,6 +23,12 @@ ZOOM_IN_HEX = "eb901455aadc11300f0000000000000000025800000074f9"
 ZOOM_OUT_HEX = "eb901455aadc11300f000000000000000002180000003479"
 ZOOM_STOP_HEX = "eb901455aadc11300f000000000000000000400000006ed9"
 
+# ==========================================
+# 3. СПЕЦІАЛЬНІ КОМАНДИ (Home та Абсолютні кути)
+# ==========================================
+HOME_HEX         = "eb901455aadc11300400003ffc000000000000000000e641"
+PITCH_DOWN_90_HEX = "eb901455aadc113012000000000000000000000000003361"
+
 STARTUP_PACKETS = [
     "eb901055aadc0d01e4000000000000000000e8b5",
     "eb90063e2a002a000092"
@@ -67,7 +73,7 @@ def on_press(key):
     if camera_socket is None or key == current_key: return
 
     try:
-        # Керування рухом (Стрілки)
+        # Стрілочки (Рух)
         if key == keyboard.Key.up:
             camera_socket.sendall(bytes.fromhex(MOVE_UP_HEX))
             current_key = key
@@ -81,15 +87,26 @@ def on_press(key):
             camera_socket.sendall(bytes.fromhex(MOVE_RIGHT_HEX))
             current_key = key
 
-        # Керування зумом (Букви W/S або символи +/-)
+        # Букви (Зум та Спецфункції)
         elif hasattr(key, 'char') and key.char:
             char = key.char.lower()
-            if char in ['w', '+', '=']:
+            if char == 'w':
                 camera_socket.sendall(bytes.fromhex(ZOOM_IN_HEX))
                 current_key = key
-            elif char in ['s', '-', '_']:
+            elif char == 's':
                 camera_socket.sendall(bytes.fromhex(ZOOM_OUT_HEX))
                 current_key = key
+
+            # --- НОВІ ФУНКЦІЇ ---
+            elif char == 'h':  # Home (Додому)
+                print("\n[*] Команда: Повернення в Home...")
+                camera_socket.sendall(bytes.fromhex(HOME_HEX))
+                current_key = key
+            elif char == 'n':  # Nadir (Вниз)
+                print("\n[*] Команда: Pitch -90° (Надир)...")
+                camera_socket.sendall(bytes.fromhex(PITCH_DOWN_90_HEX))
+                current_key = key
+
     except:
         pass
 
