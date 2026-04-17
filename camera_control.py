@@ -8,13 +8,20 @@ CAMERA_IP = "192.168.2.119"
 CAMERA_PORT = 2000
 
 # ==========================================
-# 1. СЮДИ ВСТАВ ЗНАЙДЕНІ ПАКЕТИ РУХУ
+# 1. КОМАНДИ РУХУ (Yaw / Pitch)
 # ==========================================
-MOVE_UP_HEX = "eb901455aadc11300d000005dc0000049c00000000006d17"  # Встав сюди Hex для руху ВГОРУ
-MOVE_DOWN_HEX = "eb901455aadc11300d000005dc000006e000000000001303"  # Встав сюди Hex для руху ВНИЗ
-MOVE_LEFT_HEX = "eb901455aadc11300d00000550000005dc0000000000a0ff"  # Встав сюди Hex для руху ВЛІВО
-MOVE_RIGHT_HEX = "eb901455aadc11300d00000668000005dc00000000009b13"  # Встав сюди Hex для руху ВПРАВО
-STOP_HEX = "eb901455aadc11300100000000000000000000000000203d"  # Встав сюди Hex для ЗУПИНКИ
+MOVE_UP_HEX = "eb901455aadc11300d000005dc0000049c00000000006d17"
+MOVE_DOWN_HEX = "eb901455aadc11300d000005dc000006e000000000001303"
+MOVE_LEFT_HEX = "eb901455aadc11300d00000550000005dc0000000000a0ff"
+MOVE_RIGHT_HEX = "eb901455aadc11300d00000668000005dc00000000009b13"
+STOP_HEX = "eb901455aadc11300100000000000000000000000000203d"
+
+# ==========================================
+# 2. КОМАНДИ ЗУМУ (Наближення / Віддалення)
+# ==========================================
+ZOOM_IN_HEX = "eb901455aadc11300f0000000000000000025800000074f9"
+ZOOM_OUT_HEX = "eb901455aadc11300f000000000000000002180000003479"
+ZOOM_STOP_HEX = "eb901455aadc11300f000000000000000000400000006ed9"
 
 STARTUP_PACKETS = [
     "eb901055aadc0d01e4000000000000000000e8b5",
@@ -22,14 +29,12 @@ STARTUP_PACKETS = [
 ]
 STATUS_REQUEST_HEX = "eb900755aadc0414110105"
 
-# Глобальна змінна для сокета, щоб клавіатура могла в нього писати
 camera_socket = None
-# Запобіжник, щоб не спамити команду, якщо клавіша затиснута
 current_key = None
 
 
 def parse_telemetry(data_bytes):
-    """Декодер телеметрії (твій вчорашній код)"""
+    """Декодер телеметрії (читання координат і зуму)"""
     hex_str = data_bytes.hex()
     is_moving = "f7ff" in hex_str
     marker_idx = hex_str.find("f7ff") if is_moving else hex_str.find("b7ff")
@@ -47,24 +52,22 @@ def parse_telemetry(data_bytes):
             zoom_val = data_bytes[-2] / 10.0
 
             status_text = "🔄 Рух " if is_moving else "⏸️ Стоп"
-            # Використовуємо \r щоб рядок оновлювався на одному місці, а не спамив униз
-            print(f"\r[{status_text}] Yaw: {yaw_deg:>6.2f}° | Pitch: {pitch_deg:>6.2f}° | Зум: {zoom_val:>4}x", end="")
+            print(f"\r[{status_text}] Yaw: {yaw_deg:>6.2f}° | Pitch: {pitch_deg:>6.2f}° | Зум: {zoom_val:>4.1f}x",
+                  end="")
 
         except:
             pass
 
 
 # ==========================================
-# 2. СИСТЕМА КЕРУВАННЯ КЛАВІАТУРОЮ
+# СИСТЕМА КЕРУВАННЯ КЛАВІАТУРОЮ
 # ==========================================
 def on_press(key):
     global current_key, camera_socket
-    if camera_socket is None: return
-
-    # Якщо ми вже тримаємо цю кнопку - ігноруємо (щоб не спамити мережу)
-    if key == current_key: return
+    if camera_socket is None or key == current_key: return
 
     try:
+        # Керування рухом (Стрілки)
         if key == keyboard.Key.up:
             camera_socket.sendall(bytes.fromhex(MOVE_UP_HEX))
             current_key = key
@@ -77,7 +80,17 @@ def on_press(key):
         elif key == keyboard.Key.right:
             camera_socket.sendall(bytes.fromhex(MOVE_RIGHT_HEX))
             current_key = key
-    except Exception as e:
+
+        # Керування зумом (Букви W/S або символи +/-)
+        elif hasattr(key, 'char') and key.char:
+            char = key.char.lower()
+            if char in ['w', '+', '=']:
+                camera_socket.sendall(bytes.fromhex(ZOOM_IN_HEX))
+                current_key = key
+            elif char in ['s', '-', '_']:
+                camera_socket.sendall(bytes.fromhex(ZOOM_OUT_HEX))
+                current_key = key
+    except:
         pass
 
 
@@ -85,13 +98,23 @@ def on_release(key):
     global current_key, camera_socket
     if camera_socket is None: return
 
-    # Коли ВІДПУСКАЄМО стрілку - відправляємо команду СТОП
+    # Відпускання стрілок -> Зупинка руху
     if key in [keyboard.Key.up, keyboard.Key.down, keyboard.Key.left, keyboard.Key.right]:
         try:
             camera_socket.sendall(bytes.fromhex(STOP_HEX))
         except:
             pass
         current_key = None
+
+    # Відпускання кнопок зуму -> Зупинка зуму
+    elif hasattr(key, 'char') and key.char:
+        char = key.char.lower()
+        if char in ['w', '+', '=', 's', '-', '_']:
+            try:
+                camera_socket.sendall(bytes.fromhex(ZOOM_STOP_HEX))
+            except:
+                pass
+            current_key = None
 
     # Вихід зі скрипта по кнопці Esc
     if key == keyboard.Key.esc:
@@ -100,18 +123,17 @@ def on_release(key):
 
 
 # ==========================================
-# 3. ОСНОВНИЙ ЦИКЛ ЗВ'ЯЗКУ
+# ОСНОВНИЙ ЦИКЛ ЗВ'ЯЗКУ
 # ==========================================
 def main():
     global camera_socket
 
-    # Запускаємо слухача клавіатури у фоновому потоці
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
-        camera_socket = s  # Передаємо сокет глобально, щоб клавіатура могла ним користуватись
+        camera_socket = s
 
         print(f"[*] Підключаємось до {CAMERA_IP}:{CAMERA_PORT}...")
         try:
@@ -123,9 +145,10 @@ def main():
                 time.sleep(0.1)
 
             print("[+] Ініціалізація успішна!")
-            print("[*] УПРАВЛІННЯ: Стрілки на клавіатурі (Up, Down, Left, Right).")
-            print("[*] Вихід: Натисни ESC.\n")
-            print("-" * 60)
+            print("[*] УПРАВЛІННЯ РУХОМ: Стрілки (Up, Down, Left, Right)")
+            print("[*] УПРАВЛІННЯ ЗУМОМ: Кнопки 'W' (Наблизити) та 'S' (Віддалити)")
+            print("[*] ВИХІД: Натисни ESC\n")
+            print("-" * 65)
 
             last_poll_time = time.time()
 
