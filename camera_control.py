@@ -8,7 +8,7 @@ CAMERA_IP = "192.168.2.119"
 CAMERA_PORT = 2000
 
 # ==========================================
-# 1. КОМАНДИ РУХУ (Yaw / Pitch)
+# 1. КОМАНДИ РУХУ ТА ЗУМУ
 # ==========================================
 MOVE_UP_HEX = "eb901455aadc11300d000005dc0000049c00000000006d17"
 MOVE_DOWN_HEX = "eb901455aadc11300d000005dc000006e000000000001303"
@@ -16,42 +16,41 @@ MOVE_LEFT_HEX = "eb901455aadc11300d00000550000005dc0000000000a0ff"
 MOVE_RIGHT_HEX = "eb901455aadc11300d00000668000005dc00000000009b13"
 STOP_HEX = "eb901455aadc11300100000000000000000000000000203d"
 
-# ==========================================
-# 2. КОМАНДИ ЗУМУ
-# ==========================================
 ZOOM_IN_HEX = "eb901455aadc11300f0000000000000000025800000074f9"
 ZOOM_OUT_HEX = "eb901455aadc11300f000000000000000002180000003479"
 ZOOM_STOP_HEX = "eb901455aadc11300f000000000000000000400000006ed9"
 
-# ==========================================
-# 3. СПЕЦІАЛЬНІ КОМАНДИ (Home / Nadir)
-# ==========================================
 HOME_HEX = "eb901455aadc11300400003ffc000000000000000000e641"
 PITCH_DOWN_90_HEX = "eb901455aadc113012000000000000000000000000003361"
 
 # ==========================================
-# 4. ТЕПЛОВІЗОР ТА ПАЛІТРИ
+# 2. МАТРИЦЯ СТАНІВ ЕКРАНА (Сенсор + PIP + Палітра)
 # ==========================================
-CAM_VISIBLE_HEX = "eb901455aadc11300f0000e0020000000004830000004bdf"  # ir -> visible1
-CAM_THERMAL_HEX = "eb901455aadc11300f0000e0020000000004840000004ce1"  # visible1 -> ir
+# Коли ОПТИКА головна, а PIP вимкнений (колір не має значення)
+VIS_PIP_OFF = "eb901455aadc11300f0000e0020000000003810000004edf"
 
-IR_WHITE_HOT_HEX = "eb901455aadc11300f0000e0020000000003840000004bdf"
-IR_BLACK_HOT_HEX = "eb901455aadc11300f0000e0020000000003c40000000bdf"
-IR_IRON_RED_HEX = "eb901455aadc11300f0000e0020000000004840000004ce1"
-
-PALETTES = [
-    ("White Hot", IR_WHITE_HOT_HEX),
-    ("Black Hot", IR_BLACK_HOT_HEX),
-    ("Iron Red", IR_IRON_RED_HEX)
+# Коли ОПТИКА головна, а PIP увімкнений (колір міняє тепловізор у віконці)
+VIS_PIP_ON_PALETTES = [
+    "eb901455aadc11300f0000e0020000000003830000004cdf",  # White Hot
+    "eb901455aadc11300f0000e0020000000003c30000000cdf",  # Black Hot
+    "eb901455aadc11300f0000e0020000000004830000004bdf"  # Iron Red
 ]
 
-# ==========================================
-# 5. КАРТИНКА В КАРТИНЦІ (PIP)
-# ==========================================
-VIS_PIP_ON_HEX = "eb901455aadc11300f0000e0020000000003830000004cdf"
-VIS_PIP_OFF_HEX = "eb901455aadc11300f0000e0020000000003810000004edf"
-IR_PIP_ON_HEX = "eb901455aadc11300f0000e0020000000003840000004bdf"
-IR_PIP_OFF_HEX = "eb901455aadc11300f0000e0020000000003820000004ddf"
+# Коли ТЕПЛОВІЗОР головний, а PIP ВИМКНЕНИЙ (твої нові пакети)
+IR_PIP_OFF_PALETTES = [
+    "eb901455aadc11300f0000e0020000000003820000004ddf",  # White Hot
+    "eb901455aadc11300f000000000000000003c1000000ecdb",  # Black Hot (Новий)
+    "eb901455aadc11300f00000000000000000481000000ab5b"  # Iron Red (Новий)
+]
+
+# Коли ТЕПЛОВІЗОР головний, а PIP УВІМКНЕНИЙ (віконце оптики)
+IR_PIP_ON_PALETTES = [
+    "eb901455aadc11300f0000e0020000000003840000004bdf",  # White Hot
+    "eb901455aadc11300f0000e0020000000003c40000000bdf",  # Black Hot
+    "eb901455aadc11300f0000e0020000000004840000004ce1"  # Iron Red
+]
+
+PALETTE_NAMES = ["White Hot", "Black Hot", "Iron Red"]
 
 STARTUP_PACKETS = [
     "eb901055aadc0d01e4000000000000000000e8b5",
@@ -68,8 +67,30 @@ is_pip_on = False
 palette_idx = 0
 
 
+def apply_display_state():
+    """Розумний менеджер: підбирає 1 правильний Hex на основі 3 параметрів"""
+    global camera_socket
+    if not camera_socket: return
+
+    cmd_hex = ""
+    if not is_thermal:
+        if not is_pip_on:
+            cmd_hex = VIS_PIP_OFF
+        else:
+            cmd_hex = VIS_PIP_ON_PALETTES[palette_idx]
+    else:
+        if not is_pip_on:
+            cmd_hex = IR_PIP_OFF_PALETTES[palette_idx]
+        else:
+            cmd_hex = IR_PIP_ON_PALETTES[palette_idx]
+
+    try:
+        camera_socket.sendall(bytes.fromhex(cmd_hex))
+    except:
+        pass
+
+
 def parse_telemetry(data_bytes):
-    """Декодер телеметрії (читання координат і зуму)"""
     hex_str = data_bytes.hex()
     is_moving = "f7ff" in hex_str
     marker_idx = hex_str.find("f7ff") if is_moving else hex_str.find("b7ff")
@@ -89,20 +110,16 @@ def parse_telemetry(data_bytes):
             status_text = "🔄 Рух " if is_moving else "⏸️ Стоп"
             print(f"\r[{status_text}] Yaw: {yaw_deg:>6.2f}° | Pitch: {pitch_deg:>6.2f}° | Зум: {zoom_val:>4.1f}x",
                   end="")
-
         except:
             pass
 
 
-# ==========================================
-# СИСТЕМА КЕРУВАННЯ КЛАВІАТУРОЮ
-# ==========================================
 def on_press(key):
     global current_key, camera_socket, is_thermal, is_pip_on, palette_idx
     if camera_socket is None or key == current_key: return
 
     try:
-        # Стрілочки (Рух)
+        # Рух
         if key == keyboard.Key.up:
             camera_socket.sendall(bytes.fromhex(MOVE_UP_HEX))
             current_key = key
@@ -116,7 +133,7 @@ def on_press(key):
             camera_socket.sendall(bytes.fromhex(MOVE_RIGHT_HEX))
             current_key = key
 
-        # Букви
+        # Інші кнопки
         elif hasattr(key, 'char') and key.char:
             char = key.char.lower()
             if char == 'w':
@@ -134,39 +151,25 @@ def on_press(key):
                 camera_socket.sendall(bytes.fromhex(PITCH_DOWN_90_HEX))
                 current_key = key
 
-            # --- ЛОГІКА ТЕПЛОВІЗОРА ---
+            # --- ЛОГІКА ЕКРАНА (Тепер просто змінюємо статус і викликаємо менеджер) ---
             elif char == 't':
                 is_thermal = not is_thermal
-                is_pip_on = False  # Скидаємо PIP при зміні сенсора
-                if is_thermal:
-                    print("\n[🔥] Увімкнено ТЕПЛОВІЗОР")
-                    camera_socket.sendall(bytes.fromhex(CAM_THERMAL_HEX))
-                else:
-                    print("\n[📷] Увімкнено ОПТИЧНУ КАМЕРУ")
-                    camera_socket.sendall(bytes.fromhex(CAM_VISIBLE_HEX))
+                sensor_name = "ТЕПЛОВІЗОР" if is_thermal else "ОПТИКУ"
+                print(f"\n[👁️] Перемикання на {sensor_name}")
+                apply_display_state()
+                current_key = key
+
+            elif char == 'i':
+                is_pip_on = not is_pip_on
+                pip_status = "УВІМКНЕНО" if is_pip_on else "ВИМКНЕНО"
+                print(f"\n[🔲] Режим PIP: {pip_status}")
+                apply_display_state()
                 current_key = key
 
             elif char == 'p':
-                if is_thermal:
-                    palette_idx = (palette_idx + 1) % len(PALETTES)
-                    p_name, p_hex = PALETTES[palette_idx]
-                    print(f"\n[🎨] Палітра тепловізора: {p_name}")
-                    camera_socket.sendall(bytes.fromhex(p_hex))
-                else:
-                    print("\n[!] Палітри працюють лише в режимі тепловізора (натисни T)")
-                current_key = key
-
-            # --- ЛОГІКА PIP (Картинка в картинці) ---
-            elif char == 'i':
-                is_pip_on = not is_pip_on
-                if not is_thermal:  # Якщо зараз оптика
-                    cmd = VIS_PIP_ON_HEX if is_pip_on else VIS_PIP_OFF_HEX
-                else:  # Якщо зараз тепловізор
-                    cmd = IR_PIP_ON_HEX if is_pip_on else IR_PIP_OFF_HEX
-
-                status_str = "УВІМКНЕНО" if is_pip_on else "ВИМКНЕНО"
-                print(f"\n[🔲] Режим PIP (Картинка в картинці): {status_str}")
-                camera_socket.sendall(bytes.fromhex(cmd))
+                palette_idx = (palette_idx + 1) % 3
+                print(f"\n[🎨] Палітра тепловізора: {PALETTE_NAMES[palette_idx]}")
+                apply_display_state()
                 current_key = key
 
     except:
@@ -177,7 +180,6 @@ def on_release(key):
     global current_key, camera_socket
     if camera_socket is None: return
 
-    # Відпускання стрілок
     if key in [keyboard.Key.up, keyboard.Key.down, keyboard.Key.left, keyboard.Key.right]:
         try:
             camera_socket.sendall(bytes.fromhex(STOP_HEX))
@@ -185,7 +187,6 @@ def on_release(key):
             pass
         current_key = None
 
-    # Відпускання зуму
     elif hasattr(key, 'char') and key.char:
         char = key.char.lower()
         if char in ['w', 's']:
@@ -200,9 +201,6 @@ def on_release(key):
         return False
 
 
-# ==========================================
-# ОСНОВНИЙ ЦИКЛ ЗВ'ЯЗКУ
-# ==========================================
 def main():
     global camera_socket
 
@@ -222,10 +220,12 @@ def main():
                 s.sendall(bytes.fromhex(hex_packet))
                 time.sleep(0.1)
 
+            # Синхронізуємо початковий стан камери (Оптика, без PIP)
+            apply_display_state()
+
             print("[+] Ініціалізація успішна!")
             print("[*] РУХ: Стрілки | ЗУМ: W / S | HOME: H | НАДИР: N")
-            print("[*] ТЕПЛОВІЗОР: T (Увімк/Вимк) | ПАЛІТРИ: P")
-            print("[*] PIP (Віконце): I")
+            print("[*] ТЕПЛОВІЗОР: T | ПАЛІТРИ: P | PIP (Віконце): I")
             print("[*] ВИХІД: ESC\n")
             print("-" * 65)
 
